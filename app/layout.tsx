@@ -1,5 +1,6 @@
 import { TokenPriceProvider } from '@/components/token-price-provider'
 import { ThemeProvider } from '@/components/theme-provider'
+import { SolanaWalletProvider } from '@/components/solana-wallet-provider'
 import './globals.css'
 
 export default function RootLayout({
@@ -17,7 +18,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <TokenPriceProvider>
-            {children}
+            <SolanaWalletProvider>
+              {children}
+            </SolanaWalletProvider>
           </TokenPriceProvider>
         </ThemeProvider>
       </body>

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Wallet, LogOut } from "lucide-react"
 import Moralis from "moralis"
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 
 interface WalletConnectionProps {
   onConnect: (address: string) => void
@@ -130,25 +131,15 @@ export function WalletConnection({ onConnect, onDisconnect }: WalletConnectionPr
   }
 
   return (
-    <Button
-      onClick={connectWallet}
-      disabled={isLoading}
-      className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
-    >
-      <Wallet className="mr-2 h-4 w-4" />
-      {isLoading ? "Connecting..." : "Connect Wallet"}
-    </Button>
+    <div className="flex items-center space-x-2">
+      <WalletMultiButton />
+    </div>
   )
 }
 
 // Extend Window interface for Solana wallet
 declare global {
   interface Window {
-    solana?: {
-      isPhantom?: boolean
-      connect: (options?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toString: () => string } }>
-      disconnect: () => Promise<void>
-      signTransaction?: (tx: import("@solana/web3.js").Transaction) => Promise<import("@solana/web3.js").Transaction>
-    }
+    // Remove solana type declaration to avoid conflicts with wallet adapter
   }
 }
