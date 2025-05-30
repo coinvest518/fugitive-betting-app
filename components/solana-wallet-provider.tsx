@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useMemo } from 'react';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import {
