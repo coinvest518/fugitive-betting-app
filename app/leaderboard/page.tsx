@@ -29,7 +29,8 @@ export default function LeaderboardPage() {
       setIsLoading(true)
       try {
         const data = await getLeaderboard(timeframe)
-        setLeaderboardData(data)
+        // Add rank property to each entry
+        setLeaderboardData(data.map((entry, i) => ({ ...entry, rank: i + 1 })))
       } catch (error) {
         console.error("Error fetching leaderboard:", error)
         // Fallback to mock data if Moralis fails

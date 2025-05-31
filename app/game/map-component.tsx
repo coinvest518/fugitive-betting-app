@@ -415,7 +415,7 @@ export function MapComponent({
       </div>
 
       {/* Map Legend */}
-      <div className="absolute bottom-4 left-4 bg-black/90 text-white p-3 rounded-lg text-xs border border-yellow-400/30 z-20 backdrop-blur-sm max-w-[200px]">
+      <div className="absolute bottom-2 right-2 bg-black/90 text-white p-3 rounded-lg text-xs border border-yellow-400/30 z-20 backdrop-blur-sm max-w-[200px] pointer-events-auto opacity-90">
         <div className="font-bold text-yellow-400 mb-2">New Orleans Districts</div>
         <div className="grid grid-cols-2 gap-1 text-xs">
           <div className="flex items-center space-x-1">

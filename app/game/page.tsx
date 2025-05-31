@@ -14,6 +14,7 @@ import { MapComponent } from "./map-component"
 import { BettingSystem } from "@/components/betting-system"
 import { FbtBalance } from "@/components/fbt-balance"
 import { WalletConnection } from "@/components/wallet-connection"
+import { LeaderboardMarquee } from "@/components/leaderboard-marquee"
 
 interface Location {
   id: string
@@ -104,7 +105,7 @@ const locations: Location[] = [
   {
     id: "algiers",
     name: "Algiers",
-    x: 25,
+    x: 10, // moved further left to avoid being blocked
     y: 75,
     description: "Historic neighborhood on the West Bank across the Mississippi River",
   },
@@ -809,6 +810,7 @@ export default function GamePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
       <div className="max-w-6xl mx-auto">
+        <LeaderboardMarquee />
         {/* Responsive Header */}
         <header className="flex flex-col md:flex-row items-center md:items-end justify-between gap-4 md:gap-8 mb-8 border-b border-slate-800 pb-4">
           <div className="flex-1 w-full text-center md:text-left">
