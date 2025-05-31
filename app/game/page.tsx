@@ -13,6 +13,7 @@ import { config } from "@/lib/config"
 import { MapComponent } from "./map-component"
 import { BettingSystem } from "@/components/betting-system"
 import { FbtBalance } from "@/components/fbt-balance"
+import { WalletConnection } from "@/components/wallet-connection"
 
 interface Location {
   id: string
@@ -154,6 +155,7 @@ export default function GamePage() {
   const [message, setMessage] = useState("Welcome to New Orleans! Choose your role and start the hunt...")
   const [aiThinking, setAiThinking] = useState(false)
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
+  const [isConnected, setIsConnected] = useState(false)
   const [locationTooltip, setLocationTooltip] = useState<{ id: string; x: number; y: number } | null>(null)
   const mapRef = useRef<HTMLDivElement>(null)
 
@@ -162,19 +164,44 @@ export default function GamePage() {
   const successSoundRef = useRef<HTMLAudioElement | null>(null)
   const failureSoundRef = useRef<HTMLAudioElement | null>(null)
   const powerupSoundRef = useRef<HTMLAudioElement | null>(null)
+  const winSoundRef = useRef<HTMLAudioElement | null>(null)
+  const [musicEnabled, setMusicEnabled] = useState(true)
+  const musicRef = useRef<HTMLAudioElement | null>(null)
 
   // Initialize audio elements
   useEffect(() => {
     if (typeof window !== "undefined") {
-      clickSoundRef.current = new Audio("/sounds/click.mp3")
-      successSoundRef.current = new Audio("/sounds/success.mp3")
-      failureSoundRef.current = new Audio("/sounds/failure.mp3")
+      clickSoundRef.current = new Audio("/sounds/game-bonus.mp3")
+      successSoundRef.current = new Audio("/sounds/game-start-1.mp3")
+      failureSoundRef.current = new Audio("/sounds/game-start-2.mp3")
       powerupSoundRef.current = new Audio("/sounds/powerup.mp3")
+      winSoundRef.current = new Audio("/sounds/win.mp3")
+      musicRef.current = new Audio("/sounds/Gangstar New Orleans - Cemetary Mission (1).mp3")
+      musicRef.current.loop = true
+      if (musicEnabled) {
+        musicRef.current.volume = 0.5
+        musicRef.current.play().catch(() => {})
+      }
+    }
+    return () => {
+      musicRef.current?.pause()
+      musicRef.current = null
     }
   }, [])
 
+  // Play/pause music on toggle (now also depends on gameState.soundEnabled)
+  useEffect(() => {
+    if (!musicRef.current) return
+    if (musicEnabled && gameState.soundEnabled) {
+      musicRef.current.currentTime = 0
+      musicRef.current.play().catch(() => {})
+    } else {
+      musicRef.current.pause()
+    }
+  }, [musicEnabled, gameState.soundEnabled])
+
   // Play sound helper function
-  const playSound = (sound: "click" | "success" | "failure" | "powerup") => {
+  const playSound = (sound: "click" | "success" | "failure" | "powerup" | "win") => {
     if (!gameState.soundEnabled) return
 
     switch (sound) {
@@ -190,6 +217,9 @@ export default function GamePage() {
       case "powerup":
         powerupSoundRef.current?.play().catch((e) => console.log("Audio play error:", e))
         break
+      case "win":
+        winSoundRef.current?.play().catch((e) => console.log("Audio play error:", e))
+        break
     }
   }
 
@@ -200,6 +230,25 @@ export default function GamePage() {
       soundEnabled: !prev.soundEnabled,
     }))
   }
+
+  // Toggle music
+  const toggleMusic = () => setMusicEnabled((prev) => !prev)
+
+  // Load user stats from Moralis when walletAddress changes
+  useEffect(() => {
+    if (!walletAddress) return
+    getUserStats(walletAddress)
+      .then((stats) => {
+        setGameState((prev) => ({
+          ...prev,
+          captureScore: stats.captures,
+          escapeScore: stats.escapes,
+        }))
+      })
+      .catch((error) => {
+        console.error("Error loading user stats:", error)
+      })
+  }, [walletAddress])
 
   // Check for wallet connection and load user stats
   useEffect(() => {
@@ -760,30 +809,28 @@ export default function GamePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <Link href="/">
-            <Button variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-500/10">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Home
-            </Button>
-          </Link>
-          <h1 className="text-3xl font-bold text-white">🎯 New Orleans Fugitive Tracker</h1>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="border-purple-500 text-purple-300 hover:bg-purple-500/10"
-              onClick={openJupiterModal}
-            >
-              <ArrowLeft className="mr-2 h-4 w-4 rotate-90" />
-              Swap Tokens
-            </Button>
-            <FbtBalance walletAddress={walletAddress} />
-            <Button variant="ghost" size="icon" onClick={toggleSound} className="text-purple-300 hover:bg-purple-500/10">
-              {gameState.soundEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
-            </Button>
+        {/* Responsive Header */}
+        <header className="flex flex-col md:flex-row items-center md:items-end justify-between gap-4 md:gap-8 mb-8 border-b border-slate-800 pb-4">
+          <div className="flex-1 w-full text-center md:text-left">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-white drop-shadow-lg">
+              🎯 New Orleans Fugitive Tracker
+            </h1>
+            <p className="mt-2 text-slate-300 text-sm sm:text-base font-medium max-w-md mx-auto md:mx-0">
+              Play as a tracker or fugitive. Outsmart your opponent in the heart of New Orleans!
+            </p>
           </div>
-        </div>
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 w-full md:w-auto justify-center md:justify-end">
+            <WalletConnection onConnect={() => {}} onDisconnect={() => {}} />
+            <FbtBalance walletAddress={walletAddress} />
+          </div>
+        </header>
+
+        {/* Tabs or Controls Row (if any) */}
+        {/* Example: Add your tabs here, styled for mobile/desktop */}
+        {/* <div className="flex flex-wrap gap-2 md:gap-4 mb-6 justify-center md:justify-start">
+          <Button variant="secondary">Tab 1</Button>
+          <Button variant="secondary">Tab 2</Button>
+        </div> */}
 
         {/* Role Selection */}
         <div className="flex justify-center gap-4 mb-6">
@@ -822,8 +869,7 @@ export default function GamePage() {
                     ? "Search the historic districts and neighborhoods for the hidden fugitive"
                     : "Choose a district to hide in and evade the AI tracker"}
                 </CardDescription>
-              </CardHeader>
-              <CardContent>
+              </CardHeader>              <CardContent>
                 <MapComponent
                   locations={locations}
                   guessedLocations={gameState.guessedLocations}
@@ -832,7 +878,40 @@ export default function GamePage() {
                   shieldActive={gameState.shieldActive}
                   aiThinking={aiThinking}
                   onLocationClick={handleLocationClick}
-                />
+                />                {/* Message Area */}
+                <div className="mt-4 p-4 bg-black/30 border border-purple-800/30 rounded-lg">
+                  <p className="text-center text-gray-300">{message}</p>
+                </div>
+                {/* Control Buttons */}
+                <div className="flex justify-center gap-2 mt-4">
+                  <Button
+                    onClick={() => newGame()}
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    New Game
+                  </Button>
+                  <Button
+                    onClick={showHint}
+                    disabled={gameState.hintUsed || gameState.role !== "tracker" || !gameState.gameActive}
+                    variant="outline"
+                    className="border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10"
+                  >
+                    <Lightbulb className="mr-2 h-4 w-4" />
+                    Use Hint
+                  </Button>
+                  <Button onClick={toggleSound} variant="outline">
+                    {gameState.soundEnabled ? (
+                      <>
+                        <Volume2 className="mr-2 h-4 w-4" /> Sound On
+                      </>
+                    ) : (
+                      <>
+                        <VolumeX className="mr-2 h-4 w-4" /> Sound Off
+                      </>
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -919,40 +998,8 @@ export default function GamePage() {
                   <div className="text-xs text-gray-400 mt-2">Stats synced to wallet</div>
                 ) : (
                   <div className="text-xs text-gray-400 mt-2">Connect wallet to save stats</div>
-                )}
-              </CardContent>
+                )}              </CardContent>
             </Card>
-
-            {/* Controls */}
-            <div className="space-y-2">
-              <Button
-                onClick={() => newGame()}
-                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
-              >
-                <RotateCcw className="mr-2 h-4 w-4" />
-                New Game
-              </Button>
-              <Button
-                onClick={showHint}
-                disabled={gameState.hintUsed || gameState.role !== "tracker" || !gameState.gameActive}
-                variant="outline"
-                className="w-full border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10"
-              >
-                <Lightbulb className="mr-2 h-4 w-4" />
-                Use Hint
-              </Button>
-              <Button onClick={toggleSound} variant="outline" className="w-full">
-                {gameState.soundEnabled ? (
-                  <>
-                    <Volume2 className="mr-2 h-4 w-4" /> Sound On
-                  </>
-                ) : (
-                  <>
-                    <VolumeX className="mr-2 h-4 w-4" /> Sound Off
-                  </>
-                )}
-              </Button>
-            </div>
           </div>
         </div>
 
@@ -960,16 +1007,9 @@ export default function GamePage() {
         <div className="mt-6">
           <BettingSystem
             walletAddress={walletAddress}
-            isConnected={walletAddress !== null && walletAddress !== undefined}
+            isConnected={isConnected}
           />
         </div>
-
-        {/* Message Area */}
-        <Card className="mt-6 bg-black/30 border-purple-800/30 backdrop-blur-sm">
-          <CardContent className="p-4">
-            <p className="text-center text-gray-300">{message}</p>
-          </CardContent>
-        </Card>
       </div>
     </div>
   )

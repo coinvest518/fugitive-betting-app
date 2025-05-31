@@ -1,122 +1,118 @@
-import Moralis from "moralis"
-
-// Initialize Moralis
-export const initMoralis = async () => {
-  try {
-    if (!Moralis.Core.isStarted) {
-      await Moralis.start({
-        apiKey: process.env.MORALIS_API_KEY || process.env.NEXT_PUBLIC_MORALIS_API_KEY,
-      })
-      console.log("Moralis initialized successfully")
-    }
-  } catch (error) {
-    console.error("Failed to initialize Moralis:", error)
-  }
+// Type definitions
+export interface BetData {
+  id?: string;
+  user_address: string;
+  fugitiveId: string;
+  fugitiveName: string;
+  amount: number;
+  type: "yes" | "no";
+  odds: number;
+  potentialWin: number;
+  status: "active" | "won" | "lost";
+  timestamp: Date;
 }
 
-// Get user stats from Moralis
-export const getUserStats = async (address: string) => {
-  try {
-    await initMoralis()
-
-    // Query the database for user stats
-    // In a real implementation, we would use Moralis.Cloud.run or a similar method
-    // For now, we'll use localStorage as a fallback since we're in a client environment
-
-    if (typeof window !== "undefined") {
-      const statsKey = `fugitive-tracker-stats-${address}`
-      const savedStats = localStorage.getItem(statsKey)
-
-      if (savedStats) {
-        try {
-          const parsedStats = JSON.parse(savedStats)
-          return {
-            captures: parsedStats.captures || 0,
-            escapes: parsedStats.escapes || 0,
-          }
-        } catch (e) {
-          console.error("Error parsing saved stats:", e)
-        }
-      }
-    }
-
-    // If no stats found or error parsing, return default stats
-    return { captures: 0, escapes: 0 }
-  } catch (error) {
-    console.error("Error fetching user stats from Moralis:", error)
-    return { captures: 0, escapes: 0 }
-  }
+interface UserStats {
+  address: string;
+  captures: number;
+  escapes: number;
+  totalGames: number;
+  winRate: number;
+  rewards: number;
 }
 
-// Save user stats to Moralis
-export const saveUserStats = async (address: string, stats: { captures: number; escapes: number }) => {
+// API endpoints for data storage
+const API_BASE_URL = '/api';
+
+// Save bet data using Supabase API
+export const saveBet = async (bet: Omit<BetData, 'id' | 'status' | 'timestamp'>) => {
+  const response = await fetch('/api/bets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...bet,
+      status: 'active',
+      timestamp: new Date(),
+    }),
+  });
+  return response.json();
+};
+
+// Get user's bets from Supabase API
+export const getUserBets = async (address: string): Promise<BetData[]> => {
+  const response = await fetch(`/api/users/${address}/bets`);
+  const data = await response.json();
+  return data.bets || [];
+};
+
+// Update bet status
+export const updateBetStatus = async (betId: string, status: "won" | "lost"): Promise<{ success: boolean }> => {
   try {
-    await initMoralis()
+    const response = await fetch(`${API_BASE_URL}/bets/${betId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
 
-    // In a real implementation, we would use Moralis.Cloud.run or a similar method
-    // For now, we'll use localStorage as a fallback since we're in a client environment
-
-    if (typeof window !== "undefined") {
-      const statsKey = `fugitive-tracker-stats-${address}`
-      localStorage.setItem(statsKey, JSON.stringify(stats))
-    }
-
-    // Simulate a Moralis API call
-    console.log(`Stats saved for ${address}: Captures=${stats.captures}, Escapes=${stats.escapes}`)
-
-    return { success: true }
+    return { success: response.ok };
   } catch (error) {
-    console.error("Error saving user stats to Moralis:", error)
-    return { success: false }
+    console.error("Error updating bet status:", error);
+    return { success: false };
   }
-}
+};
 
-// Get leaderboard data from Moralis
-export const getLeaderboard = async (timeframe: "daily" | "weekly" | "all-time") => {
+// Get pool statistics for a fugitive from Supabase API
+export const getFugitivePoolStats = async (fugitiveId: string): Promise<{
+  totalPool: number;
+  yesPool: number;
+  noPool: number;
+}> => {
+  const response = await fetch(`/api/fugitives/${fugitiveId}/pool-stats`);
+  return response.json();
+};
+
+// Get user stats
+export const getUserStats = async (address: string): Promise<{ 
+  captures: number; 
+  escapes: number; 
+}> => {
   try {
-    await initMoralis()
-
-    // In a real implementation, we would query Moralis for leaderboard data
-    // For now, we'll return mock data
-
-    // Mock leaderboard data
-    const mockLeaderboard = [
-      { rank: 1, address: "7xKX...9mPq", captures: 156, escapes: 89, winRate: 63.7, totalGames: 245, rewards: 45.2 },
-      { rank: 2, address: "9kLm...3nRt", captures: 142, escapes: 78, winRate: 64.5, totalGames: 220, rewards: 38.7 },
-      { rank: 3, address: "5pQr...8vWx", captures: 134, escapes: 91, winRate: 59.6, totalGames: 225, rewards: 35.1 },
-      { rank: 4, address: "2hBn...7cYz", captures: 128, escapes: 67, winRate: 65.6, totalGames: 195, rewards: 32.4 },
-      { rank: 5, address: "8tFg...4jKl", captures: 119, escapes: 83, winRate: 58.9, totalGames: 202, rewards: 29.8 },
-      { rank: 6, address: "6mVc...1pLq", captures: 115, escapes: 76, winRate: 60.2, totalGames: 191, rewards: 27.3 },
-      { rank: 7, address: "4nXz...5rSt", captures: 108, escapes: 89, winRate: 54.8, totalGames: 197, rewards: 24.9 },
-      { rank: 8, address: "3dWe...9hMn", captures: 102, escapes: 71, winRate: 59.0, totalGames: 173, rewards: 22.1 },
-      { rank: 9, address: "1kPo...6tYu", captures: 98, escapes: 84, winRate: 53.8, totalGames: 182, rewards: 19.7 },
-      { rank: 10, address: "9iUy...2qAz", captures: 94, escapes: 78, winRate: 54.7, totalGames: 172, rewards: 17.8 },
-    ]
-
-    // For daily and weekly, we'll return a subset of the data with different values
-    if (timeframe === "daily") {
-      return mockLeaderboard.slice(0, 5).map((entry, i) => ({
-        ...entry,
-        rank: i + 1,
-        captures: Math.floor(entry.captures / 10),
-        escapes: Math.floor(entry.escapes / 10),
-        totalGames: Math.floor(entry.totalGames / 10),
-        rewards: Number((entry.rewards / 10).toFixed(1)),
-      }))
-    } else if (timeframe === "weekly") {
-      return mockLeaderboard.slice(0, 8).map((entry, i) => ({
-        ...entry,
-        rank: i + 1,
-        captures: Math.floor(entry.captures / 2),
-        escapes: Math.floor(entry.escapes / 2),
-        totalGames: Math.floor(entry.totalGames / 2),
-        rewards: Number((entry.rewards / 2).toFixed(1)),
-      }))
-    }
-
-    return mockLeaderboard
+    const response = await fetch(`${API_BASE_URL}/users/${address}/fbt-game-stats`);
+    const data = await response.json();
+    return data || { captures: 0, escapes: 0 };
   } catch (error) {
-    console.error("Error fetching leaderboard data from Moralis:", error)
-    return []
+    console.error("Error fetching user stats:", error);
+    return { captures: 0, escapes: 0 };
   }
-}
+};
+
+// Save user stats
+export const saveUserStats = async (
+  address: string, 
+  stats: { captures: number; escapes: number }
+): Promise<{ success: boolean }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/${address}/fbt-game-stats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stats)
+    });
+
+    return { success: response.ok };
+  } catch (error) {
+    console.error("Error saving user stats:", error);
+    return { success: false };
+  }
+};
+
+// Get leaderboard data
+export const getLeaderboard = async (timeframe: "daily" | "weekly" | "all-time"): Promise<UserStats[]> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/leaderboard?timeframe=${timeframe}`);
+    const data = await response.json();
+    return data.leaderboard || [];
+  } catch (error) {
+    console.error("Error fetching leaderboard:", error);
+    return [];
+  }
+};

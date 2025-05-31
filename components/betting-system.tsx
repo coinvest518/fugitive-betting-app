@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -9,6 +9,16 @@ import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TrendingUp, TrendingDown, Clock, DollarSign, Target, Zap, Trophy } from "lucide-react"
 import { config } from "@/lib/config"
+import { saveBet, getUserBets, updateBetStatus, getFugitivePoolStats, BetData } from "@/lib/moralis"
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select"
+import { PublicKey, Connection, Transaction } from "@solana/web3.js"
+import { getAssociatedTokenAddress, createTransferInstruction, createAssociatedTokenAccountInstruction } from "@solana/spl-token"
+
+const FBT_MINT = process.env.NEXT_PUBLIC_FBT_TOKEN_MINT || "3WTRBAff4xWSYPjHephFmupG2LeTXvSyFAx8YKKWNpzY"
+const FBT_DECIMALS = 9
+const FEE_WALLET = process.env.NEXT_PUBLIC_FBT_FEE_WALLET || "321pvxk5pcQCQuDy7PDZe6iUqHj9pEEyJZiHFsvD7Jzw"
+const SOLANA_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com"
+const FEE_BPS = 100 // 1% fee (100 basis points)
 
 interface Fugitive {
   id: string
@@ -31,52 +41,56 @@ interface BettingSystemProps {
 }
 
 export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps) {
-  useEffect(() => {
-    console.log("BettingSystem: Wallet address:", walletAddress)
-    console.log("BettingSystem: Is connected:", isConnected)
-  }, [walletAddress, isConnected])
-
   const [selectedFugitive, setSelectedFugitive] = useState<string | null>(null)
   const [betAmount, setBetAmount] = useState("")
   const [betType, setBetType] = useState<"yes" | "no">("yes")
-  const [userBets, setUserBets] = useState<any[]>([])
+  const [userBets, setUserBets] = useState<BetData[]>([])
   const [isPlacingBet, setIsPlacingBet] = useState(false)
+  const [poolStats, setPoolStats] = useState({
+    totalPool: 0,
+    yesPool: 0,
+    noPool: 0,
+  })
+  const [odds, setOdds] = useState({ yes: 2.0, no: 2.0 })
+  const [currency, setCurrency] = useState<'SOL' | 'FBT'>('SOL')
 
   // Mock fugitive data - in real app this would come from Moralis
-  const [fugitives, setFugitives] = useState<Fugitive[]>([
-    {
-      id: "antoine-masse",
-      name: "Antoine Masse",
-      description: "High-profile fugitive from New Orleans East",
-      sprite: "🥷",
-      deadline: new Date(0), // placeholder
-      totalPool: 2847.5,
-      yesPool: 1623.2,
-      noPool: 1224.3,
-      yesOdds: 2.4,
-      noOdds: 3.1,
-      status: "active",
-      daysRemaining: 15, // placeholder
-    },
-    {
-      id: "derrick-groves",
-      name: "Derrick Groves",
-      description: "Escaped from custody in French Quarter",
-      sprite: "🏃",
-      deadline: new Date(0), // placeholder
-      totalPool: 1456.8,
-      yesPool: 892.1,
-      noPool: 564.7,
-      yesOdds: 1.8,
-      noOdds: 4.2,
-      status: "active",
-      daysRemaining: 8, // placeholder
-    },
-  ])
+  const [fugitives, setFugitives] = useState<Fugitive[]>(
+    [
+      {
+        id: "antoine-masse",
+        name: "Antoine Masse",
+        description: "High-profile fugitive from New Orleans East",
+        sprite: "🥷",
+        deadline: new Date(0), // placeholder
+        totalPool: 2847.5,
+        yesPool: 1623.2,
+        noPool: 1224.3,
+        yesOdds: 2.4,
+        noOdds: 3.1,
+        status: "active",
+        daysRemaining: 15, // placeholder
+      },
+      {
+        id: "derrick-groves",
+        name: "Derrick Groves",
+        description: "Escaped from custody in French Quarter",
+        sprite: "🏃",
+        deadline: new Date(0), // placeholder
+        totalPool: 1456.8,
+        yesPool: 892.1,
+        noPool: 564.7,
+        yesOdds: 1.8,
+        noOdds: 4.2,
+        status: "active",
+        daysRemaining: 8, // placeholder
+      },
+    ],
+  )
 
   // Set real deadlines and daysRemaining on client only
   useEffect(() => {
-    const now = Date.now();
+    const now = Date.now()
     setFugitives((prev) => [
       {
         ...prev[0],
@@ -88,8 +102,8 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
         deadline: new Date(now + 8 * 24 * 60 * 60 * 1000),
         daysRemaining: 8,
       },
-    ]);
-  }, []);
+    ])
+  }, [])
 
   // Calculate dynamic odds based on time remaining
   const calculateDynamicOdds = (fugitive: Fugitive) => {
@@ -135,38 +149,84 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
     }
   }, [walletAddress])
 
+  const loadUserBets = useCallback(async () => {
+    if (walletAddress) {
+      const bets = await getUserBets(walletAddress)
+      setUserBets(bets)
+    }
+  }, [walletAddress])
+
+  const loadPoolStats = useCallback(async () => {
+    const stats = await getFugitivePoolStats(selectedFugitive!)
+    setPoolStats(stats)
+
+    // Update odds based on pool distribution
+    if (stats.totalPool > 0) {
+      const yesOdds = (stats.totalPool / stats.yesPool) || 2.0
+      const noOdds = (stats.totalPool / stats.noPool) || 2.0
+      setOdds({ yes: yesOdds, no: noOdds })
+    }
+  }, [selectedFugitive])
+
+  useEffect(() => {
+    loadUserBets()
+    loadPoolStats()
+  }, [loadUserBets, loadPoolStats])
+
   const placeBet = async () => {
     if (!walletAddress || !selectedFugitive || !betAmount) return
 
     setIsPlacingBet(true)
 
     try {
-      // --- BEGIN WALLET INTERACTION ---
-      if (!config.rpcEndpoint) {
-        alert("No RPC endpoint configured. Please check your environment variables.")
+      // First validate the configuration
+      if (!config.rpcEndpoint || !config.betPoolWallet) {
+        alert("Missing configuration. Please check your environment variables.")
         setIsPlacingBet(false)
         return
       }
-      if (typeof window !== "undefined" && window.solana && window.solana.isPhantom) {
-        // Use wallet address from environment variable
-        const recipient = config.betPoolWallet
-        if (!recipient) {
-          alert("No bet pool wallet address configured. Please check your environment variables.")
-          setIsPlacingBet(false)
-          return
-        }
-        const amountLamports = Math.floor(Number.parseFloat(betAmount) * 1e9) // 1 SOL = 1e9 lamports
+
+      // Verify wallet connection
+      if (typeof window === "undefined" || !window.solana || !window.solana.isPhantom) {
+        alert("Phantom wallet not found or not connected.")
+        setIsPlacingBet(false)
+        return
+      }
+
+      const fugitive = fugitives.find((f) => f.id === selectedFugitive)!
+      const amount = Number.parseFloat(betAmount)
+
+      // Create the bet in Supabase
+      const betData = {
+        user_address: walletAddress,
+        fugitiveId: selectedFugitive,
+        fugitiveName: fugitive.name,
+        amount,
+        type: betType,
+        odds: betType === "yes" ? fugitive.yesOdds : fugitive.noOdds,
+        potentialWin: amount * (betType === "yes" ? fugitive.yesOdds : fugitive.noOdds),
+        currency,
+      }
+
+      const saveBetResponse = await saveBet(betData)
+
+      if (!saveBetResponse.success) {
+        throw new Error("Failed to save bet data")
+      }
+
+      if (currency === 'SOL') {
+        const amountLamports = Math.floor(amount * 1e9)
         // @ts-ignore
         const solanaWeb3 = (await import("@solana/web3.js"))
         const connection = new solanaWeb3.Connection(config.rpcEndpoint)
         const fromPubkey = new solanaWeb3.PublicKey(walletAddress)
-        const toPubkey = new solanaWeb3.PublicKey(recipient)
+        const toPubkey = new solanaWeb3.PublicKey(config.betPoolWallet)
         const transaction = new solanaWeb3.Transaction().add(
           solanaWeb3.SystemProgram.transfer({
             fromPubkey,
             toPubkey,
             lamports: amountLamports,
-          })
+          }),
         )
         transaction.feePayer = fromPubkey
         transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash
@@ -174,54 +234,43 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
         const signed = await window.solana.signTransaction(transaction)
         const txid = await connection.sendRawTransaction(signed.serialize())
         await connection.confirmTransaction(txid)
-      } else {
-        alert("Phantom wallet not found or not connected.")
-        setIsPlacingBet(false)
-        return
+      } else if (currency === 'FBT') {
+        // SPL token transfer with fee
+        // @ts-ignore
+        const provider = window.solana
+        await provider.connect()
+        const connection = new Connection(SOLANA_RPC)
+        const from = new PublicKey(walletAddress)
+        const to = new PublicKey(config.betPoolWallet)
+        const mint = new PublicKey(FBT_MINT)
+        const feeWallet = new PublicKey(FEE_WALLET)
+        const ataFrom = await getAssociatedTokenAddress(mint, from)
+        const ataTo = await getAssociatedTokenAddress(mint, to)
+        const ataFee = await getAssociatedTokenAddress(mint, feeWallet)
+        // Check if recipient ATA exists
+        const ataToInfo = await connection.getAccountInfo(ataTo)
+        const ataFeeInfo = await connection.getAccountInfo(ataFee)
+        const instructions = []
+        if (!ataToInfo) {
+          instructions.push(createAssociatedTokenAccountInstruction(from, ataTo, to, mint))
+        }
+        if (!ataFeeInfo) {
+          instructions.push(createAssociatedTokenAccountInstruction(from, ataFee, feeWallet, mint))
+        }
+        const rawAmount = Math.floor(amount * 10 ** FBT_DECIMALS)
+        const fee = Math.floor((rawAmount * FEE_BPS) / 10000)
+        const toSend = rawAmount - fee
+        if (toSend <= 0) throw new Error("Amount too small after fee")
+        instructions.push(createTransferInstruction(ataFrom, ataTo, from, toSend))
+        instructions.push(createTransferInstruction(ataFrom, ataFee, from, fee))
+        const tx = new Transaction().add(...instructions)
+        tx.feePayer = from
+        tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash
+        if (!provider.signTransaction) throw new Error("Wallet does not support signTransaction")
+        const signed = await provider.signTransaction(tx)
+        const sig = await connection.sendRawTransaction(signed.serialize())
+        await connection.confirmTransaction(sig)
       }
-      // --- END WALLET INTERACTION ---
-
-      // Simulate bet placement (in real app, this would interact with Solana smart contract)
-      // await new Promise((resolve) => setTimeout(resolve, 2000))
-
-      const fugitive = fugitives.find((f) => f.id === selectedFugitive)!
-      const amount = Number.parseFloat(betAmount)
-
-      const newBet = {
-        id: Date.now().toString(),
-        fugitiveId: selectedFugitive,
-        fugitiveName: fugitive.name,
-        amount,
-        type: betType,
-        odds: betType === "yes" ? fugitive.yesOdds : fugitive.noOdds,
-        potentialWin: amount * (betType === "yes" ? fugitive.yesOdds : fugitive.noOdds),
-        timestamp: new Date(),
-        status: "active",
-      }
-
-      const updatedBets = [...userBets, newBet]
-      setUserBets(updatedBets)
-      localStorage.setItem(`bets-${walletAddress}`, JSON.stringify(updatedBets))
-
-      // Update fugitive pools
-      setFugitives((prev) =>
-        prev.map((f) => {
-          if (f.id === selectedFugitive) {
-            const newYesPool = betType === "yes" ? f.yesPool + amount : f.yesPool
-            const newNoPool = betType === "no" ? f.noPool + amount : f.noPool
-            return {
-              ...f,
-              yesPool: newYesPool,
-              noPool: newNoPool,
-              totalPool: newYesPool + newNoPool,
-            }
-          }
-          return f
-        }),
-      )
-
-      setBetAmount("")
-      alert(`Bet placed successfully! ${amount} SOL on ${betType.toUpperCase()} for ${fugitive.name}`)
     } catch (error) {
       console.error("Error placing bet:", error)
       alert("Failed to place bet. Please try again.")
@@ -246,8 +295,8 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
 
   // Check for RPC endpoint
   if (!config.rpcEndpoint) {
-    console.error("No RPC endpoint configured. Please check your environment variables.");
-    return null;
+    console.error("No RPC endpoint configured. Please check your environment variables.")
+    return null
   }
 
   return (
@@ -389,7 +438,7 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
                   <CardContent className="space-y-4">
                     <div className="flex items-center space-x-4">
                       <div className="flex-1">
-                        <label className="text-gray-300 text-sm block mb-1">Bet Amount (SOL)</label>
+                        <label className="text-gray-300 text-sm block mb-1">Bet Amount ({currency})</label>
                         <Input
                           type="number"
                           placeholder="0.1"
@@ -397,6 +446,18 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
                           onChange={(e) => setBetAmount(e.target.value)}
                           className="bg-black/20 border-purple-800/30 text-white"
                         />
+                      </div>
+                      <div>
+                        <label className="text-gray-300 text-sm block mb-1">Currency</label>
+                        <Select value={currency} onValueChange={v => setCurrency(v as 'SOL' | 'FBT')}>
+                          <SelectTrigger className="w-24 bg-black/20 border-purple-800/30 text-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="SOL">SOL</SelectItem>
+                            <SelectItem value="FBT">FBT</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="text-center">
                         <div className="text-gray-300 text-sm">Potential Win</div>
@@ -409,7 +470,7 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
                                   : fugitives.find((f) => f.id === selectedFugitive)?.noOdds || 0)
                               ).toFixed(2)
                             : "0.00"}{" "}
-                          SOL
+                          {currency}
                         </div>
                       </div>
                     </div>
@@ -420,7 +481,7 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
                       className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
                     >
                       <Zap className="mr-2 h-4 w-4" />
-                      {isPlacingBet ? "Placing Bet..." : `Bet ${betAmount || "0"} SOL on ${betType.toUpperCase()}`}
+                      {isPlacingBet ? `Placing Bet...` : `Bet ${betAmount || "0"} ${currency} on ${betType.toUpperCase()}`}
                     </Button>
                   </CardContent>
                 </Card>
@@ -450,6 +511,19 @@ export function BettingSystem({ walletAddress, isConnected }: BettingSystemProps
                           <div className="text-right">
                             <div className="text-green-400 font-bold">+{bet.potentialWin.toFixed(2)} SOL</div>
                             <Badge className="bg-yellow-500/20 text-yellow-300 border-yellow-500/30">{bet.status}</Badge>
+                            {/* Demo: Mark bet as won/lost */}
+                            {bet.status === "active" && bet.id && (
+                              <div className="mt-2 space-x-2">
+                                <Button size="sm" variant="outline" onClick={async () => {
+                                  await updateBetStatus(bet.id!, "won");
+                                  loadUserBets();
+                                }}>Mark Won</Button>
+                                <Button size="sm" variant="outline" onClick={async () => {
+                                  await updateBetStatus(bet.id!, "lost");
+                                  loadUserBets();
+                                }}>Mark Lost</Button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </CardContent>

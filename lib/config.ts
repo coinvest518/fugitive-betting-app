@@ -15,17 +15,12 @@ const getRpcEndpoint = () => {
 
 // Utility function to retry failed API calls
 export async function retryFetch(url: string, options?: RequestInit): Promise<Response> {
-  let lastError: Error | null = null;
-  
+  let lastError;
+  let delay = API_RETRY_DELAY;
+
   for (let i = 0; i < API_RETRY_COUNT; i++) {
     try {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options?.headers,
-        },
-      });
+      const response = await fetch(url, options);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -33,14 +28,16 @@ export async function retryFetch(url: string, options?: RequestInit): Promise<Re
       
       return response;
     } catch (error) {
-      lastError = error as Error;
-      if (i < API_RETRY_COUNT - 1) {
-        await new Promise(resolve => setTimeout(resolve, API_RETRY_DELAY * (i + 1)));
-      }
+      console.error(`Attempt ${i + 1} failed:`, error);
+      lastError = error;
+      
+      // Exponential backoff
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2; // Double the delay for next attempt
     }
   }
-  
-  throw lastError || new Error('Failed to fetch after retries');
+
+  throw lastError;
 }
 
 export const config = {
