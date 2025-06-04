@@ -1,0 +1,10 @@
+{
+  "name": "Urban Runner #2",
+  "symbol": "FGT",
+  "description": "A unique fugitive character.",
+  "image": "ipfs://bafkreig5xphivv6yxzgnhxvr66psoarojtptxnzsqqqqele2eqa2d4kbiy",
+  "attributes": [
+    { "trait_type": "Type", "value": "Fugitive" },
+    { "trait_type": "Rarity", "value": "Common" }
+  ]
+}

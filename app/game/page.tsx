@@ -9,12 +9,16 @@ import { ArrowLeft, RotateCcw, Lightbulb, Flag, Zap, Shield, Eye, Volume2, Volum
 import Link from "next/link"
 import { getUserStats, saveUserStats } from "@/lib/moralis"
 import { config } from "@/lib/config"
+import { useTokenPrices } from "@/components/token-price-provider"
 // Import the MapComponent
 import { MapComponent } from "./map-component"
 import { BettingSystem } from "@/components/betting-system"
 import { FbtBalance } from "@/components/fbt-balance"
 import { WalletConnection } from "@/components/wallet-connection"
 import { LeaderboardMarquee } from "@/components/leaderboard-marquee"
+import { useWallet } from "@solana/wallet-adapter-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Connection, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 
 interface Location {
   id: string
@@ -155,8 +159,14 @@ export default function GamePage() {
 
   const [message, setMessage] = useState("Welcome to New Orleans! Choose your role and start the hunt...")
   const [aiThinking, setAiThinking] = useState(false)
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // Wallet logic (move useWallet to top level)
+  const { publicKey, connected, sendTransaction } = useWallet();
+  const walletAddress = mounted && publicKey ? publicKey.toBase58() : null;
+  const isConnected = mounted && connected;
+
   const [locationTooltip, setLocationTooltip] = useState<{ id: string; x: number; y: number } | null>(null)
   const mapRef = useRef<HTMLDivElement>(null)
 
@@ -257,8 +267,6 @@ export default function GamePage() {
       // Check if wallet is connected from localStorage
       const address = localStorage.getItem("walletAddress")
       if (address) {
-        setWalletAddress(address)
-
         // Load user stats from Moralis
         try {
           const stats = await getUserStats(address)
@@ -280,8 +288,6 @@ export default function GamePage() {
   useEffect(() => {
     const handleWalletConnection = (event: CustomEvent) => {
       const { address } = event.detail
-      setWalletAddress(address)
-      localStorage.setItem("walletAddress", address)
 
       // Load user stats
       getUserStats(address)
@@ -799,6 +805,12 @@ export default function GamePage() {
     }
   }
 
+  const { prices, loading: priceLoading } = useTokenPrices();
+  const solPrice = prices["So11111111111111111111111111111111111111112"]?.price || 0;
+  const nftUsdPrice = 20;
+  const nftSolPrice = solPrice ? (nftUsdPrice / solPrice).toFixed(3) : "-";
+
+
   useEffect(() => {
     newGame()
   }, [newGame])
@@ -806,6 +818,117 @@ export default function GamePage() {
   useEffect(() => {
     console.log("Game state updated:", gameState)
   }, [gameState])
+
+  // NFT minting UI state
+  const [minting, setMinting] = useState<string | null>(null); // card id or null
+  const [mintResult, setMintResult] = useState<{ success: boolean; message: string; mintAddress?: string } | null>(null);
+  const [mintDialogOpen, setMintDialogOpen] = useState(false);
+  const [selectedCard, setSelectedCard] = useState<typeof nftCards[0] | null>(null);
+  const [mintStep, setMintStep] = useState<'info' | 'paying' | 'minting' | 'done' | 'error'>('info');
+  const [mintDialogMessage, setMintDialogMessage] = useState<string>("");
+
+  // Updated Mint NFT handler to open dialog
+  const handleMintNft = (card: typeof nftCards[0]) => {
+    setSelectedCard(card);
+    setMintDialogOpen(true);
+    setMintStep('info');
+    setMintDialogMessage("");
+  };
+
+  // Simulated payment and minting logic (replace with real logic)
+  const handleMintDialogContinue = async () => {
+    if (!walletAddress || !selectedCard) return;
+    setMintStep('paying');
+    setMintDialogMessage('Waiting for wallet approval and payment...');
+
+    try {
+      // 1. Prepare payment transaction
+      const treasury = process.env.NEXT_PUBLIC_TREASURY_WALLET;
+      if (!treasury) throw new Error("Treasury wallet not set");
+      const treasuryPubkey = new PublicKey(treasury);
+      const userPubkey = new PublicKey(walletAddress);
+      const connection = new Connection(config.rpcEndpoint || "https://api.mainnet-beta.solana.com");
+      // Calculate amount in lamports
+      const solPrice = prices["So11111111111111111111111111111111111111112"]?.price || 0;
+      const nftUsdPrice = 20;
+      const nftSolPrice = solPrice ? (nftUsdPrice / solPrice) : 0;
+      const lamports = Math.ceil(nftSolPrice * 1e9); // 1 SOL = 1e9 lamports
+
+      // 2. Create transaction
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: userPubkey,
+          toPubkey: treasuryPubkey,
+          lamports,
+        })
+      );
+
+      // 3. Request signature from wallet
+      if (!sendTransaction) throw new Error("Wallet not ready");
+      const signature = await sendTransaction(transaction, connection);
+      setMintDialogMessage('Waiting for payment confirmation...');
+      // 4. Wait for confirmation
+      await connection.confirmTransaction(signature, 'confirmed');
+
+      setMintStep('minting');
+      setMintDialogMessage('Minting NFT to your wallet...');
+      setMinting(selectedCard.id);
+      // 5. Call backend to mint NFT
+      const res = await fetch("/api/mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, metadataUri: selectedCard.metadataUri, paymentSignature: signature }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMintStep('done');
+        setMintDialogMessage('NFT minted successfully!');
+        setMintResult({ success: true, message: "NFT minted successfully!", mintAddress: data.mintAddress });
+      } else {
+        setMintStep('error');
+        setMintDialogMessage(data.message || "Minting failed.");
+        setMintResult({ success: false, message: data.message || "Minting failed." });
+      }
+    } catch (e: any) {
+      setMintStep('error');
+      setMintDialogMessage(e.message || 'Minting failed. Please try again.');
+      setMintResult({ success: false, message: e.message || "Minting failed. Please try again." });
+    } finally {
+      setMinting(null);
+    }
+  };
+
+  // Map NFT cards to metadata URIs
+  const nftCards = [
+    {
+      id: "2",
+      name: "Urban Runner",
+      image: "/characters/2.png",
+      tag: "#FGT01",
+      metadataUri: "/metadata/2.json",
+    },
+    {
+      id: "3",
+      name: "Street Phantom",
+      image: "/characters/3.png",
+      tag: "#FGT02",
+      metadataUri: "/metadata/3.json",
+    },
+    {
+      id: "4",
+      name: "Night Agent",
+      image: "/characters/4.png",
+      tag: "#FGT03",
+      metadataUri: "/metadata/4.json",
+    },
+    {
+      id: "5",
+      name: "Urban Ghost",
+      image: "/characters/5.png",
+      tag: "#FGT04",
+      metadataUri: "/metadata/5.json",
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
@@ -822,8 +945,8 @@ export default function GamePage() {
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 w-full md:w-auto justify-center md:justify-end">
-            <WalletConnection onConnect={() => {}} onDisconnect={() => {}} />
-            <FbtBalance walletAddress={walletAddress} />
+            {mounted && <WalletConnection onConnect={() => {}} onDisconnect={() => {}} />}
+            {mounted && <FbtBalance walletAddress={walletAddress} />}
           </div>
         </header>
 
@@ -861,65 +984,8 @@ export default function GamePage() {
         </div>
 
         <div className="grid lg:grid-cols-4 gap-6">
-          {/* Game Area */}
-          <div className="lg:col-span-3">
-            <Card className="bg-black/30 border-purple-800/30 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-white text-center">New Orleans - The Crescent City</CardTitle>
-                <CardDescription className="text-gray-300 text-center">
-                  {gameState.role === "tracker"
-                    ? "Search the historic districts and neighborhoods for the hidden fugitive"
-                    : "Choose a district to hide in and evade the AI tracker"}
-                </CardDescription>
-              </CardHeader>              <CardContent>
-                <MapComponent
-                  locations={locations}
-                  guessedLocations={gameState.guessedLocations}
-                  fugitiveLocation={gameState.fugitiveLocation}
-                  role={gameState.role}
-                  shieldActive={gameState.shieldActive}
-                  aiThinking={aiThinking}
-                  onLocationClick={handleLocationClick}
-                />                {/* Message Area */}
-                <div className="mt-4 p-4 bg-black/30 border border-purple-800/30 rounded-lg">
-                  <p className="text-center text-gray-300">{message}</p>
-                </div>
-                {/* Control Buttons */}
-                <div className="flex justify-center gap-2 mt-4">
-                  <Button
-                    onClick={() => newGame()}
-                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
-                  >
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    New Game
-                  </Button>
-                  <Button
-                    onClick={showHint}
-                    disabled={gameState.hintUsed || gameState.role !== "tracker" || !gameState.gameActive}
-                    variant="outline"
-                    className="border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10"
-                  >
-                    <Lightbulb className="mr-2 h-4 w-4" />
-                    Use Hint
-                  </Button>
-                  <Button onClick={toggleSound} variant="outline">
-                    {gameState.soundEnabled ? (
-                      <>
-                        <Volume2 className="mr-2 h-4 w-4" /> Sound On
-                      </>
-                    ) : (
-                      <>
-                        <VolumeX className="mr-2 h-4 w-4" /> Sound Off
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Game Info Sidebar */}
-          <div className="space-y-4">
+          {/* Game Stats and Controls Panel */}
+          <div className="lg:col-span-1 space-y-4">
             {/* Game Status */}
             <Card className="bg-black/30 border-purple-800/30 backdrop-blur-sm">
               <CardHeader className="pb-3">
@@ -1002,9 +1068,108 @@ export default function GamePage() {
                   <div className="text-xs text-gray-400 mt-2">Connect wallet to save stats</div>
                 )}              </CardContent>
             </Card>
+          </div>          {/* Main Game Area with Map */}
+          <div className="lg:col-span-3">
+            {/* Map Component */}
+            <Card className="bg-black/30 border-purple-800/30 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white text-center">New Orleans - The Crescent City</CardTitle>
+                <CardDescription className="text-gray-300 text-center">
+                  {gameState.role === "tracker"
+                    ? "Search the historic districts and neighborhoods for the hidden fugitive"
+                    : "Choose a district to hide in and evade the AI tracker"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <MapComponent
+                  locations={locations}
+                  guessedLocations={gameState.guessedLocations}
+                  fugitiveLocation={gameState.fugitiveLocation}
+                  role={gameState.role}
+                  shieldActive={gameState.shieldActive}
+                  aiThinking={aiThinking}
+                  onLocationClick={handleLocationClick}
+                />
+                {/* Message Area */}
+                <div className="mt-4 p-4 bg-black/30 border border-purple-800/30 rounded-lg">
+                  <p className="text-center text-gray-300">{message}</p>
+                </div>
+                {/* Control Buttons */}
+                <div className="flex justify-center gap-2 mt-4">
+                  <Button
+                    onClick={() => newGame()}
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    New Game
+                  </Button>
+                  <Button
+                    onClick={showHint}
+                    disabled={gameState.hintUsed || gameState.role !== "tracker" || !gameState.gameActive}
+                    variant="outline"
+                    className="border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10"
+                  >
+                    <Lightbulb className="mr-2 h-4 w-4" />
+                    Use Hint
+                  </Button>
+                  <Button onClick={toggleSound} variant="outline">
+                    {gameState.soundEnabled ? (
+                      <>
+                        <Volume2 className="mr-2 h-4 w-4" /> Sound On
+                      </>
+                    ) : (
+                      <>
+                        <VolumeX className="mr-2 h-4 w-4" /> Sound Off
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>        {/* NFT Character Collection */}
+        <div className="mt-6 mb-6">
+          <h2 className="text-2xl font-bold text-white mb-4">Featured Characters</h2>
+          {mintResult && (
+            <div className={`mb-4 p-3 rounded-lg text-center ${mintResult.success ? "bg-green-900/40 text-green-300" : "bg-red-900/40 text-red-300"}`}>
+              {mintResult.message}
+              {mintResult.mintAddress && (
+                <div className="mt-1 text-xs text-green-200 break-all">Mint Address: {mintResult.mintAddress}</div>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {nftCards.map(card => (
+              <div className="relative group" key={card.id}>
+                <div className="rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 p-4 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-purple-500/20">
+                  <div className="aspect-square rounded-lg overflow-hidden bg-gradient-to-br from-purple-500/10 to-blue-500/10 mb-3">
+                    <img src={card.image} alt={card.name + " Character"} className="w-full h-full object-contain p-2" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-white font-semibold">{card.name}</h3>
+                      <span className="text-xs text-purple-400">{card.tag}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-400">Current Price</span>
+                      <span className="text-white font-medium">
+                        {priceLoading ? "..." : `${nftSolPrice} SOL`}
+                        <span className="text-xs text-slate-400 ml-1">(${nftUsdPrice} USD)</span>
+                      </span>
+                    </div>
+                    <button
+                      className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:from-purple-500 hover:to-blue-500 transition-colors disabled:opacity-60"
+                      disabled={minting === card.id || priceLoading}
+                      onClick={() => handleMintNft(card)}
+                    >
+                      {minting === card.id ? "Minting..." : "Mint NFT"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-
         {/* Betting System */}
         <div className="mt-6">
           <BettingSystem
@@ -1013,6 +1178,40 @@ export default function GamePage() {
           />
         </div>
       </div>
+
+      {/* Minting Dialog */}
+      <Dialog open={mintDialogOpen} onOpenChange={setMintDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mint NFT: {selectedCard?.name}</DialogTitle>
+            {/* Fix hydration error: do not nest <div> inside <p> */}
+            {/* Use a fragment for the info step, and only simple text for DialogDescription */}
+            {mintStep === 'info' ? (
+              <div>
+                <div className="mb-2">You are about to mint <b>{selectedCard?.name}</b> as an NFT.</div>
+                <div className="mb-2">Price: <b>{nftSolPrice} SOL</b> (~${nftUsdPrice} USD)</div>
+                <div className="mb-2">Your wallet will open to approve the payment. After payment, the NFT will be minted to your wallet.</div>
+                <div className="mb-2 text-xs text-gray-400">Treasury: <span className="font-mono">{mounted ? process.env.NEXT_PUBLIC_TREASURY_WALLET || '...' : '...'}</span></div>
+              </div>
+            ) : (
+              <DialogDescription>
+                {mintStep === 'paying' && <span>{mintDialogMessage}</span>}
+                {mintStep === 'minting' && <span>{mintDialogMessage}</span>}
+                {mintStep === 'done' && <span className="text-green-400">{mintDialogMessage}</span>}
+                {mintStep === 'error' && <span className="text-red-400">{mintDialogMessage}</span>}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <DialogFooter>
+            {mintStep === 'info' && (
+              <Button onClick={handleMintDialogContinue} disabled={!walletAddress}>Continue &amp; Pay</Button>
+            )}
+            {(mintStep === 'done' || mintStep === 'error') && (
+              <Button onClick={() => setMintDialogOpen(false)}>Close</Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

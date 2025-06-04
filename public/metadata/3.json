@@ -1,0 +1,10 @@
+{
+  "name": "Street Phantom #3",
+  "symbol": "FGT",
+  "description": "A unique fugitive character.",
+  "image": "ipfs://bafkreifdf3kxtl7riesbvf7f7g5j2mass5kwn33tgmzzoixkestc7lt5ca",
+  "attributes": [
+    { "trait_type": "Type", "value": "Fugitive" },
+    { "trait_type": "Rarity", "value": "Uncommon" }
+  ]
+}

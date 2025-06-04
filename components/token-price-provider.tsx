@@ -41,8 +41,12 @@ export function TokenPriceProvider({ children, tokens = [config.solTokenMint] }:
       setError(null);
       const params = new URLSearchParams();
       tokens.forEach(token => params.append('ids', token));
-      // Use new Jupiter price API endpoint
-      const response = await retryFetch(`${config.jupiter.pricingApiUrl}?ids=${tokens.join(',')}`);
+      // Add custom RPC endpoint if present
+      if (config.rpcEndpoint) {
+        params.append('rpc', config.rpcEndpoint);
+      }
+      // Use new Jupiter price API endpoint with custom RPC
+      const response = await retryFetch(`${config.jupiter.pricingApiUrl}?${params.toString()}`);
       const data = await response.json();
 
       const updatedPrices: TokenPrices = {};

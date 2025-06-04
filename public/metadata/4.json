@@ -1,0 +1,10 @@
+{
+  "name": "Night Agent #4",
+  "symbol": "FGT",
+  "description": "A unique fugitive character.",
+  "image": "ipfs://bafkreih4xhiqtk4lgbs24bzqwodrx4jqsy5nx6eu2yuukddwl56wxnsifa",
+  "attributes": [
+    { "trait_type": "Type", "value": "Fugitive" },
+    { "trait_type": "Rarity", "value": "Rare" }
+  ]
+}

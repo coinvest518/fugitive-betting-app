@@ -1,0 +1,10 @@
+{
+  "name": "Urban Ghost #5",
+  "symbol": "FGT",
+  "description": "A unique fugitive character.",
+  "image": "ipfs://bafkreia5akajhhepilfq2hgttxionclllubd3awpikeye4bwdphmhe7vk4a",
+  "attributes": [
+    { "trait_type": "Type", "value": "Fugitive" },
+    { "trait_type": "Rarity", "value": "Epic" }
+  ]
+}

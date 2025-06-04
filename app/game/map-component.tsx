@@ -306,14 +306,25 @@ export function MapComponent({
 
     return classes
   }
-
-  const handleLocationHover = (locationId: string | null, x?: number, y?: number) => {
-    if (!locationId) {
+  const handleLocationHover = (locationId: string | null, event?: React.MouseEvent) => {
+    if (!locationId || !event) {
       setLocationTooltip(null)
       return
     }
 
-    setLocationTooltip({ id: locationId, x: x || 0, y: y || 0 })
+    // Get map container's bounding rectangle
+    const mapRect = mapRef.current?.getBoundingClientRect()
+    if (!mapRect) return
+
+    // Calculate relative position within the map
+    const relativeX = event.clientX - mapRect.left
+    const relativeY = event.clientY - mapRect.top
+
+    setLocationTooltip({ 
+      id: locationId, 
+      x: relativeX,
+      y: relativeY 
+    })
   }
 
   useEffect(() => {
@@ -355,9 +366,8 @@ export function MapComponent({
             left: `${location.x}%`,
             top: `${location.y}%`,
             transform: "translate(-50%, -50%)",
-          }}
-          onClick={() => onLocationClick(location.id)}
-          onMouseEnter={(e) => handleLocationHover(location.id, e.clientX, e.clientY)}
+          }}          onClick={() => onLocationClick(location.id)}
+          onMouseEnter={(e) => handleLocationHover(location.id, e)}
           onMouseLeave={() => handleLocationHover(null)}
         >
           <span className="text-xs font-bold leading-tight">{location.name}</span>
@@ -372,16 +382,15 @@ export function MapComponent({
             </>
           )}
         </div>
-      ))}
-
-      {/* Location tooltip */}
+      ))}      {/* Location tooltip */}
       {locationTooltip && (
         <div
           className="absolute z-30 bg-black/95 text-white p-3 rounded-lg text-sm max-w-[280px] shadow-2xl border border-yellow-400/50 backdrop-blur-sm"
           style={{
             left: `${locationTooltip.x}px`,
-            top: `${locationTooltip.y - 40}px`,
-            transform: "translate(-50%, -100%)",
+            top: `${locationTooltip.y}px`,
+            transform: 'translate(-50%, -120%)',
+            pointerEvents: 'none'
           }}
         >
           <div className="font-bold text-yellow-400 mb-1">
